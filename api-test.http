@@ -1,0 +1,434 @@
+### E-Commerce API Tests
+### Use with VS Code REST Client extension or import into Postman
+
+@baseUrl = http://localhost:5000/api
+@adminToken = REPLACE_WITH_ADMIN_TOKEN
+@userToken  = REPLACE_WITH_USER_TOKEN
+
+# ────────────────────────────────────────────────────────────────────────────
+# HEALTH CHECK
+# ────────────────────────────────────────────────────────────────────────────
+
+### Health check
+GET {{baseUrl}}/health
+
+# ────────────────────────────────────────────────────────────────────────────
+# AUTH
+# ────────────────────────────────────────────────────────────────────────────
+
+### Register a new user
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Test User",
+  "email": "test@example.com",
+  "password": "password123",
+  "phone": "+1-555-9999",
+  "address": "789 Test St, Test City"
+}
+
+###
+
+### Login as admin  →  copy token → set @adminToken above
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@shop.com",
+  "password": "admin123"
+}
+
+###
+
+### Login as regular user  →  copy token → set @userToken above
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@shop.com",
+  "password": "user1234"
+}
+
+###
+
+### Get current user profile
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{userToken}}
+
+###
+
+### Update profile
+PUT {{baseUrl}}/auth/me
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "name": "John Updated",
+  "phone": "+1-555-8888",
+  "address": "999 New Address, New City"
+}
+
+###
+
+### Register with invalid email (expect 400)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "name": "Bad User",
+  "email": "not-an-email",
+  "password": "123"
+}
+
+###
+
+### Login with wrong password (expect 401)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@shop.com",
+  "password": "wrongpassword"
+}
+
+# ────────────────────────────────────────────────────────────────────────────
+# CATEGORIES
+# ────────────────────────────────────────────────────────────────────────────
+
+### Get all categories
+GET {{baseUrl}}/categories
+
+###
+
+### Get category by ID
+GET {{baseUrl}}/categories/1
+
+###
+
+### Get category by slug
+GET {{baseUrl}}/categories/electronics
+
+###
+
+### Create category (admin only)
+POST {{baseUrl}}/categories
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Toys & Games",
+  "description": "Fun toys and games for all ages.",
+  "image": "https://images.unsplash.com/photo-1558060370-d644479cb6f7?w=400"
+}
+
+###
+
+### Create category without auth (expect 401)
+POST {{baseUrl}}/categories
+Content-Type: application/json
+
+{
+  "name": "Unauthorized Category"
+}
+
+###
+
+### Create category as regular user (expect 403)
+POST {{baseUrl}}/categories
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "name": "Forbidden Category"
+}
+
+# ────────────────────────────────────────────────────────────────────────────
+# PRODUCTS
+# ────────────────────────────────────────────────────────────────────────────
+
+### Get all products
+GET {{baseUrl}}/products
+
+###
+
+### Get products — paginated
+GET {{baseUrl}}/products?page=1&limit=6
+
+###
+
+### Get products — by category slug
+GET {{baseUrl}}/products?category=electronics
+
+###
+
+### Get products — search
+GET {{baseUrl}}/products?search=iphone
+
+###
+
+### Get products — price range
+GET {{baseUrl}}/products?minPrice=10&maxPrice=100
+
+###
+
+### Get products — sorted by price asc
+GET {{baseUrl}}/products?sort=price_asc
+
+###
+
+### Get product by ID
+GET {{baseUrl}}/products/1
+
+###
+
+### Get non-existent product (expect 404)
+GET {{baseUrl}}/products/99999
+
+###
+
+### Create product (admin only)
+POST {{baseUrl}}/products
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "name": "Test Product",
+  "description": "A test product description.",
+  "price": 29.99,
+  "originalPrice": 39.99,
+  "stock": 100,
+  "categoryId": 1,
+  "image": "https://images.unsplash.com/photo-1581235720704-06d3acfcb36f?w=400"
+}
+
+###
+
+### Update product (admin only)
+PUT {{baseUrl}}/products/1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "price": 999.00,
+  "stock": 45
+}
+
+###
+
+### Delete (soft-deactivate) product (admin only)
+DELETE {{baseUrl}}/products/25
+Authorization: Bearer {{adminToken}}
+
+# ────────────────────────────────────────────────────────────────────────────
+# CART
+# ────────────────────────────────────────────────────────────────────────────
+
+### Get cart (creates empty cart if first time)
+GET {{baseUrl}}/cart
+Authorization: Bearer {{userToken}}
+
+###
+
+### Add item to cart
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "productId": 1,
+  "quantity": 2
+}
+
+###
+
+### Add another item to cart
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "productId": 4,
+  "quantity": 1
+}
+
+###
+
+### Add same item again (should increase quantity)
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "productId": 1,
+  "quantity": 1
+}
+
+###
+
+### Update cart item quantity (replace itemId with actual ID from GET /cart)
+PUT {{baseUrl}}/cart/items/1
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "quantity": 5
+}
+
+###
+
+### Remove item from cart (replace itemId with actual ID)
+DELETE {{baseUrl}}/cart/items/2
+Authorization: Bearer {{userToken}}
+
+###
+
+### Clear entire cart
+DELETE {{baseUrl}}/cart
+Authorization: Bearer {{userToken}}
+
+###
+
+### Access cart without auth (expect 401)
+GET {{baseUrl}}/cart
+
+# ────────────────────────────────────────────────────────────────────────────
+# WISHLIST
+# ────────────────────────────────────────────────────────────────────────────
+
+### Get wishlist
+GET {{baseUrl}}/wishlist
+Authorization: Bearer {{userToken}}
+
+###
+
+### Add product to wishlist
+POST {{baseUrl}}/wishlist
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "productId": 3
+}
+
+###
+
+### Add another product to wishlist
+POST {{baseUrl}}/wishlist
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "productId": 7
+}
+
+###
+
+### Add duplicate product (expect 409)
+POST {{baseUrl}}/wishlist
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "productId": 3
+}
+
+###
+
+### Remove product from wishlist
+DELETE {{baseUrl}}/wishlist/3
+Authorization: Bearer {{userToken}}
+
+###
+
+### Clear wishlist
+DELETE {{baseUrl}}/wishlist
+Authorization: Bearer {{userToken}}
+
+# ────────────────────────────────────────────────────────────────────────────
+# ORDERS
+# ────────────────────────────────────────────────────────────────────────────
+
+### First: add items to cart, THEN create order
+POST {{baseUrl}}/cart/items
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "productId": 2,
+  "quantity": 1
+}
+
+###
+
+### Create order from cart
+POST {{baseUrl}}/orders
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "shippingAddress": "456 User Lane, Sample City, SC 20002",
+  "paymentMethod": "cash_on_delivery",
+  "notes": "Please ring the bell twice."
+}
+
+###
+
+### Create order with empty cart (expect 400)
+POST {{baseUrl}}/orders
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{
+  "shippingAddress": "456 User Lane, Sample City"
+}
+
+###
+
+### Create order without shipping address (expect 400)
+POST {{baseUrl}}/orders
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{}
+
+###
+
+### Get my orders
+GET {{baseUrl}}/orders
+Authorization: Bearer {{userToken}}
+
+###
+
+### Get specific order (replace 1 with actual order ID)
+GET {{baseUrl}}/orders/1
+Authorization: Bearer {{userToken}}
+
+###
+
+### Get non-existent order (expect 404)
+GET {{baseUrl}}/orders/99999
+Authorization: Bearer {{userToken}}
+
+###
+
+### Update order status (admin only)
+PATCH {{baseUrl}}/orders/1/status
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "status": "confirmed"
+}
+
+###
+
+### Get all orders — admin view
+GET {{baseUrl}}/orders/admin/all
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Get all orders filtered by status
+GET {{baseUrl}}/orders/admin/all?status=pending
+Authorization: Bearer {{adminToken}}
