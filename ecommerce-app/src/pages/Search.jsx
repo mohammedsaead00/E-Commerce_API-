@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { PRODUCTS, searchProducts } from "../data/products";
+import { api } from "../services/api";
 import ProductCard from "../components/ProductCard";
 import EmptyState from "../components/EmptyState";
 
@@ -9,7 +9,32 @@ export default function Search() {
   const query = searchParams.get("q") || "";
   const [draft, setDraft] = useState(query);
 
-  const results = useMemo(() => (query ? searchProducts(query) : PRODUCTS), [query]);
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+
+    const request = query ? api.searchProducts(query) : api.getProducts({ limit: 48 }).then((r) => r.products);
+
+    request
+      .then((list) => {
+        if (active) setResults(list);
+      })
+      .catch((err) => {
+        if (active) setError(err.message || "Search failed. Please try again.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [query]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -35,11 +60,17 @@ export default function Search() {
         <div>
           <p className="eyebrow">{query ? "Results" : "Browsing"}</p>
           <h1>{query ? `“${query}”` : "All products"}</h1>
-          <p className="text-muted">{results.length} items found</p>
+          <p className="text-muted">{loading ? "Searching…" : `${results.length} items found`}</p>
         </div>
       </div>
 
-      {results.length === 0 ? (
+      {loading && <div className="skeleton" style={{ height: 320 }} />}
+
+      {!loading && error && (
+        <EmptyState icon="⚠️" title="Something went wrong" message={error} actionTo="/" actionLabel="Back to home" />
+      )}
+
+      {!loading && !error && results.length === 0 && (
         <EmptyState
           icon="🔍"
           title="No matches"
@@ -47,7 +78,9 @@ export default function Search() {
           actionTo="/"
           actionLabel="Back to home"
         />
-      ) : (
+      )}
+
+      {!loading && !error && results.length > 0 && (
         <div className="product-grid">
           {results.map((p) => (
             <ProductCard key={p.id} product={p} />

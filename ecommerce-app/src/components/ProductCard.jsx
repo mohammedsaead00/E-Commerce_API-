@@ -1,11 +1,30 @@
-import { Link } from "react-router-dom";
-import { useWishlist } from "../context/AppContext";
+import { Link, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { useAuth, useWishlist } from "../context/AppContext";
 import { formatPrice } from "../utils/format";
 import "./ProductCard.css";
 
 export default function ProductCard({ product }) {
+  const { isAuthenticated } = useAuth();
   const { isWishlisted, toggleWishlist } = useWishlist();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
   const wishlisted = isWishlisted(product.id);
+
+  async function handleToggleWishlist() {
+    if (!isAuthenticated) {
+      navigate("/login", { state: { from: `/product/${product.id}` } });
+      return;
+    }
+    setBusy(true);
+    try {
+      await toggleWishlist(product.id);
+    } catch {
+      // Non-fatal — the button just stays in its current state.
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <article className="product-card tag-card">
@@ -21,7 +40,8 @@ export default function ProductCard({ product }) {
         className={`product-card__fav ${wishlisted ? "is-active" : ""}`}
         aria-pressed={wishlisted}
         aria-label={wishlisted ? "Remove from wishlist" : "Add to wishlist"}
-        onClick={() => toggleWishlist(product.id)}
+        onClick={handleToggleWishlist}
+        disabled={busy}
       >
         {wishlisted ? "♥" : "♡"}
       </button>
@@ -31,8 +51,8 @@ export default function ProductCard({ product }) {
           {product.name}
         </Link>
         <div className="product-card__meta">
-          <span className="eyebrow">★ {product.rating.toFixed(1)}</span>
-          <span className="eyebrow">({product.reviewCount})</span>
+          <span className="eyebrow">★ {Number(product.rating ?? 0).toFixed(1)}</span>
+          <span className="eyebrow">({product.reviewCount ?? 0})</span>
         </div>
         <div className="product-card__price-row">
           <span className="price">{formatPrice(product.price)}</span>

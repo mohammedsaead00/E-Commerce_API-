@@ -1,17 +1,50 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CATEGORIES, PRODUCTS } from "../data/products";
+import { api } from "../services/api";
 import ProductCard from "../components/ProductCard";
 import CategoryPill from "../components/CategoryPill";
 import HorizontalScroller from "../components/HorizontalScroller";
-
-function byTag(tag) {
-  return PRODUCTS.filter((p) => p.tag === tag);
-}
+import EmptyState from "../components/EmptyState";
 
 export default function Home() {
-  const bestSellers = byTag("Best seller");
-  const newArrivals = byTag("New");
-  const onSale = PRODUCTS.filter((p) => p.compareAtPrice);
+  const [categories, setCategories] = useState([]);
+  const [topRated, setTopRated] = useState([]);
+  const [newest, setNewest] = useState([]);
+  const [onSale, setOnSale] = useState([]);
+  const [allProducts, setAllProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+
+    Promise.all([
+      api.getCategories(),
+      api.getProducts({ sort: "rating", limit: 8 }),
+      api.getProducts({ sort: "newest", limit: 8 }),
+      api.getProducts({ limit: 24 }),
+    ])
+      .then(([cats, rated, fresh, all]) => {
+        if (!active) return;
+        setCategories(cats);
+        setTopRated(rated.products);
+        setNewest(fresh.products);
+        setOnSale(all.products.filter((p) => p.compareAtPrice));
+        setAllProducts(all.products);
+      })
+      .catch((err) => {
+        if (active) setError(err.message || "Couldn't load the shop right now.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <div className="home">
@@ -47,85 +80,123 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="section">
-        <div className="container">
-          <div className="section-head">
-            <h2>Shop by category</h2>
-          </div>
-          <div className="category-row">
-            {CATEGORIES.map((c) => (
-              <CategoryPill key={c.id} category={c} />
-            ))}
-          </div>
+      {error && (
+        <div className="container page-section">
+          <EmptyState
+            icon="⚠️"
+            title="Something went wrong"
+            message={error}
+            actionTo="/"
+            actionLabel="Try again"
+          />
         </div>
-      </section>
-
-      {bestSellers.length > 0 && (
-        <section className="section">
-          <div className="container">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Customer favorites</p>
-                <h2>Best sellers</h2>
-              </div>
-            </div>
-            <HorizontalScroller>
-              {bestSellers.map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
-            </HorizontalScroller>
-          </div>
-        </section>
       )}
 
-      {newArrivals.length > 0 && (
-        <section className="section">
-          <div className="container">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Just tagged in</p>
-                <h2>New arrivals</h2>
+      {!error && (
+        <>
+          <section className="section">
+            <div className="container">
+              <div className="section-head">
+                <h2>Shop by category</h2>
               </div>
+              {loading ? (
+                <div className="skeleton" style={{ height: 56 }} />
+              ) : (
+                <div className="category-row">
+                  {categories.map((c) => (
+                    <CategoryPill key={c.id} category={c} />
+                  ))}
+                </div>
+              )}
             </div>
-            <HorizontalScroller>
-              {newArrivals.map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
-            </HorizontalScroller>
-          </div>
-        </section>
-      )}
+          </section>
 
-      {onSale.length > 0 && (
-        <section className="section">
-          <div className="container">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Limited time</p>
-                <h2>On sale</h2>
+          {loading ? (
+            <section className="section">
+              <div className="container">
+                <div className="skeleton" style={{ height: 320 }} />
               </div>
-            </div>
-            <HorizontalScroller>
-              {onSale.map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
-            </HorizontalScroller>
-          </div>
-        </section>
-      )}
+            </section>
+          ) : (
+            <>
+              {topRated.length > 0 && (
+                <section className="section">
+                  <div className="container">
+                    <div className="section-head">
+                      <div>
+                        <p className="eyebrow">Customer favorites</p>
+                        <h2>Top rated</h2>
+                      </div>
+                    </div>
+                    <HorizontalScroller>
+                      {topRated.map((p) => (
+                        <ProductCard key={p.id} product={p} />
+                      ))}
+                    </HorizontalScroller>
+                  </div>
+                </section>
+              )}
 
-      <section className="section">
-        <div className="container">
-          <div className="section-head">
-            <h2>All products</h2>
-          </div>
-          <div className="product-grid">
-            {PRODUCTS.map((p) => (
-              <ProductCard key={p.id} product={p} />
-            ))}
-          </div>
-        </div>
-      </section>
+              {newest.length > 0 && (
+                <section className="section">
+                  <div className="container">
+                    <div className="section-head">
+                      <div>
+                        <p className="eyebrow">Just tagged in</p>
+                        <h2>New arrivals</h2>
+                      </div>
+                    </div>
+                    <HorizontalScroller>
+                      {newest.map((p) => (
+                        <ProductCard key={p.id} product={p} />
+                      ))}
+                    </HorizontalScroller>
+                  </div>
+                </section>
+              )}
+
+              {onSale.length > 0 && (
+                <section className="section">
+                  <div className="container">
+                    <div className="section-head">
+                      <div>
+                        <p className="eyebrow">Limited time</p>
+                        <h2>On sale</h2>
+                      </div>
+                    </div>
+                    <HorizontalScroller>
+                      {onSale.map((p) => (
+                        <ProductCard key={p.id} product={p} />
+                      ))}
+                    </HorizontalScroller>
+                  </div>
+                </section>
+              )}
+
+              <section className="section">
+                <div className="container">
+                  <div className="section-head">
+                    <h2>All products</h2>
+                  </div>
+                  {allProducts.length === 0 ? (
+                    <EmptyState
+                      icon="📦"
+                      title="No products yet"
+                      message="Check back soon — the shelves are being stocked."
+                    />
+                  ) : (
+                    <div className="product-grid">
+                      {allProducts.map((p) => (
+                        <ProductCard key={p.id} product={p} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
