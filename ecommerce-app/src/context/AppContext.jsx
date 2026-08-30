@@ -1,191 +1,301 @@
-import { createContext, useContext, useEffect, useMemo, useReducer } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { api, getToken, setToken, ApiError } from "../services/api";
 
 // ---------------------------------------------------------------------------
-// Shape of state kept deliberately flat and serializable so it maps cleanly
-// onto a future backend: `cart` -> cart line items table, `wishlist` -> a
-// join table of userId/productId, `user` -> session/auth response.
+// All cart/wishlist/order state now lives in the database, reached through
+// `api`. This context is a thin, React-friendly cache in front of it:
+// on login (or app load, if a token is already stored) we pull the user's
+// cart + wishlist down; every mutation calls the backend first and then
+// updates local state from the response, so the UI always reflects what's
+// actually persisted.
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY = "loome_state_v1";
-
-const initialState = {
-  user: null, // { id, name, email }
-  cart: [], // [{ productId, qty, variant: { size, color } }]
-  wishlist: [], // [productId]
-};
-
-function loadInitialState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return initialState;
-    const parsed = JSON.parse(raw);
-    return { ...initialState, ...parsed };
-  } catch {
-    return initialState;
-  }
-}
-
-function variantKey(variant) {
-  if (!variant) return "";
-  return `${variant.size ?? ""}|${variant.color ?? ""}`;
-}
-
-function reducer(state, action) {
-  switch (action.type) {
-    case "LOGIN":
-      return { ...state, user: action.payload };
-    case "LOGOUT":
-      return { ...state, user: null };
-
-    case "CART_ADD": {
-      const { productId, qty = 1, variant = null } = action.payload;
-      const key = variantKey(variant);
-      const existing = state.cart.find(
-        (line) => line.productId === productId && variantKey(line.variant) === key
-      );
-      if (existing) {
-        return {
-          ...state,
-          cart: state.cart.map((line) =>
-            line === existing ? { ...line, qty: line.qty + qty } : line
-          ),
-        };
-      }
-      return {
-        ...state,
-        cart: [...state.cart, { productId, qty, variant }],
-      };
-    }
-
-    case "CART_SET_QTY": {
-      const { productId, variant, qty } = action.payload;
-      const key = variantKey(variant);
-      if (qty <= 0) {
-        return {
-          ...state,
-          cart: state.cart.filter(
-            (line) => !(line.productId === productId && variantKey(line.variant) === key)
-          ),
-        };
-      }
-      return {
-        ...state,
-        cart: state.cart.map((line) =>
-          line.productId === productId && variantKey(line.variant) === key
-            ? { ...line, qty }
-            : line
-        ),
-      };
-    }
-
-    case "CART_REMOVE": {
-      const { productId, variant } = action.payload;
-      const key = variantKey(variant);
-      return {
-        ...state,
-        cart: state.cart.filter(
-          (line) => !(line.productId === productId && variantKey(line.variant) === key)
-        ),
-      };
-    }
-
-    case "CART_CLEAR":
-      return { ...state, cart: [] };
-
-    case "WISHLIST_TOGGLE": {
-      const { productId } = action.payload;
-      const exists = state.wishlist.includes(productId);
-      return {
-        ...state,
-        wishlist: exists
-          ? state.wishlist.filter((id) => id !== productId)
-          : [...state.wishlist, productId],
-      };
-    }
-
-    case "WISHLIST_REMOVE":
-      return {
-        ...state,
-        wishlist: state.wishlist.filter((id) => id !== action.payload.productId),
-      };
-
-    default:
-      return state;
-  }
-}
-
-const AppStateContext = createContext(null);
-const AppDispatchContext = createContext(null);
+const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, undefined, loadInitialState);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true); // resolving any stored token on boot
 
+  const [cart, setCart] = useState({ items: [], itemCount: 0, totalAmount: 0 });
+  const [cartLoading, setCartLoading] = useState(false);
+  const [cartError, setCartError] = useState("");
+
+  const [wishlist, setWishlist] = useState({ items: [] });
+  const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [wishlistError, setWishlistError] = useState("");
+
+  const isAuthenticated = Boolean(user);
+
+  const resetPersonalData = useCallback(() => {
+    setCart({ items: [], itemCount: 0, totalAmount: 0 });
+    setWishlist({ items: [] });
+  }, []);
+
+  // Session expired mid-use (a request came back 401): the api client has
+  // already cleared the stored token — mirror that in local state so the
+  // UI drops back to logged-out rather than showing stale user info.
+  const handleSessionExpired = useCallback(() => {
+    setUser(null);
+    resetPersonalData();
+  }, [resetPersonalData]);
+
+  const refreshCart = useCallback(async () => {
+    if (!getToken()) return;
+    setCartLoading(true);
+    setCartError("");
+    try {
+      const data = await api.getCart();
+      setCart(data);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+      setCartError(err.message || "Couldn't load your cart.");
+    } finally {
+      setCartLoading(false);
+    }
+  }, [handleSessionExpired]);
+
+  const refreshWishlist = useCallback(async () => {
+    if (!getToken()) return;
+    setWishlistLoading(true);
+    setWishlistError("");
+    try {
+      const data = await api.getWishlist();
+      setWishlist(data);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+      setWishlistError(err.message || "Couldn't load your wishlist.");
+    } finally {
+      setWishlistLoading(false);
+    }
+  }, [handleSessionExpired]);
+
+  // On boot: if a token is already stored (returning visitor), verify it
+  // and hydrate the user's cart/wishlist. This is what makes a page refresh
+  // keep the person logged in and their data intact.
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    let active = true;
+    (async () => {
+      const token = getToken();
+      if (!token) {
+        setAuthLoading(false);
+        return;
+      }
+      try {
+        const me = await api.getMe();
+        if (!active) return;
+        setUser(me);
+        await Promise.all([refreshCart(), refreshWishlist()]);
+      } catch {
+        setToken(null);
+        if (active) setUser(null);
+      } finally {
+        if (active) setAuthLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  return (
-    <AppStateContext.Provider value={state}>
-      <AppDispatchContext.Provider value={dispatch}>{children}</AppDispatchContext.Provider>
-    </AppStateContext.Provider>
+  const login = useCallback(
+    async (credentials) => {
+      const loggedInUser = await api.login(credentials);
+      setUser(loggedInUser);
+      await Promise.all([refreshCart(), refreshWishlist()]);
+      return loggedInUser;
+    },
+    [refreshCart, refreshWishlist]
   );
+
+  const register = useCallback(async (details) => {
+    const newUser = await api.register(details);
+    setUser(newUser);
+    return newUser;
+  }, []);
+
+  const logout = useCallback(() => {
+    api.logout();
+    setUser(null);
+    resetPersonalData();
+  }, [resetPersonalData]);
+
+  // ---- Cart mutations -------------------------------------------------------
+  const addToCart = useCallback(async (productId, qty = 1) => {
+    const data = await api.addCartItem(productId, qty);
+    setCart(data);
+    return data;
+  }, []);
+
+  const setCartItemQty = useCallback(async (itemId, qty) => {
+    const data = qty <= 0 ? await api.removeCartItem(itemId) : await api.updateCartItem(itemId, qty);
+    setCart(data);
+    return data;
+  }, []);
+
+  const removeFromCart = useCallback(async (itemId) => {
+    const data = await api.removeCartItem(itemId);
+    setCart(data);
+    return data;
+  }, []);
+
+  const clearCart = useCallback(async () => {
+    const data = await api.clearCart();
+    setCart(data);
+    return data;
+  }, []);
+
+  // ---- Wishlist mutations -----------------------------------------------------
+  const isWishlisted = useCallback(
+    (productId) => wishlist.items.some((item) => item.productId === productId),
+    [wishlist]
+  );
+
+  const addToWishlist = useCallback(async (productId) => {
+    const data = await api.addWishlistItem(productId);
+    setWishlist(data);
+    return data;
+  }, []);
+
+  const removeFromWishlist = useCallback(async (productId) => {
+    const data = await api.removeWishlistItem(productId);
+    setWishlist(data);
+    return data;
+  }, []);
+
+  const toggleWishlist = useCallback(
+    async (productId) => {
+      if (isWishlisted(productId)) {
+        return removeFromWishlist(productId);
+      }
+      return addToWishlist(productId);
+    },
+    [isWishlisted, addToWishlist, removeFromWishlist]
+  );
+
+  const value = useMemo(
+    () => ({
+      user,
+      isAuthenticated,
+      authLoading,
+      login,
+      register,
+      logout,
+
+      cart: cart.items,
+      cartTotals: { itemCount: cart.itemCount, totalAmount: cart.totalAmount },
+      cartLoading,
+      cartError,
+      refreshCart,
+      addToCart,
+      setCartItemQty,
+      removeFromCart,
+      clearCart,
+
+      wishlist: wishlist.items,
+      wishlistLoading,
+      wishlistError,
+      refreshWishlist,
+      isWishlisted,
+      addToWishlist,
+      removeFromWishlist,
+      toggleWishlist,
+    }),
+    [
+      user,
+      isAuthenticated,
+      authLoading,
+      login,
+      register,
+      logout,
+      cart,
+      cartLoading,
+      cartError,
+      refreshCart,
+      addToCart,
+      setCartItemQty,
+      removeFromCart,
+      clearCart,
+      wishlist,
+      wishlistLoading,
+      wishlistError,
+      refreshWishlist,
+      isWishlisted,
+      addToWishlist,
+      removeFromWishlist,
+      toggleWishlist,
+    ]
+  );
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
-export function useAppState() {
-  const ctx = useContext(AppStateContext);
-  if (!ctx) throw new Error("useAppState must be used within AppProvider");
+function useAppContext() {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error("useAppContext must be used within AppProvider");
   return ctx;
 }
-
-export function useAppDispatch() {
-  const ctx = useContext(AppDispatchContext);
-  if (!ctx) throw new Error("useAppDispatch must be used within AppProvider");
-  return ctx;
-}
-
-// ---------------------------------------------------------------------------
-// Convenience hooks built on top of the raw state/dispatch, so components
-// don't need to know action-type strings.
-// ---------------------------------------------------------------------------
 
 export function useAuth() {
-  const { user } = useAppState();
-  const dispatch = useAppDispatch();
-  return {
-    user,
-    isAuthenticated: Boolean(user),
-    login: (user) => dispatch({ type: "LOGIN", payload: user }),
-    logout: () => dispatch({ type: "LOGOUT" }),
-  };
+  const { user, isAuthenticated, authLoading, login, register, logout } = useAppContext();
+  return { user, isAuthenticated, authLoading, login, register, logout };
 }
 
 export function useCart() {
-  const { cart } = useAppState();
-  const dispatch = useAppDispatch();
+  const {
+    cart,
+    cartTotals,
+    cartLoading,
+    cartError,
+    refreshCart,
+    addToCart,
+    setCartItemQty,
+    removeFromCart,
+    clearCart,
+  } = useAppContext();
 
-  const totalItems = useMemo(() => cart.reduce((sum, line) => sum + line.qty, 0), [cart]);
+  const totalItems = cartTotals.itemCount;
 
   return {
     cart,
     totalItems,
-    addToCart: (productId, qty = 1, variant = null) =>
-      dispatch({ type: "CART_ADD", payload: { productId, qty, variant } }),
-    setQty: (productId, variant, qty) =>
-      dispatch({ type: "CART_SET_QTY", payload: { productId, variant, qty } }),
-    removeFromCart: (productId, variant) =>
-      dispatch({ type: "CART_REMOVE", payload: { productId, variant } }),
-    clearCart: () => dispatch({ type: "CART_CLEAR" }),
+    totalAmount: cartTotals.totalAmount,
+    loading: cartLoading,
+    error: cartError,
+    refresh: refreshCart,
+    addToCart,
+    setCartItemQty,
+    removeFromCart,
+    clearCart,
   };
 }
 
 export function useWishlist() {
-  const { wishlist } = useAppState();
-  const dispatch = useAppDispatch();
+  const {
+    wishlist,
+    wishlistLoading,
+    wishlistError,
+    refreshWishlist,
+    isWishlisted,
+    addToWishlist,
+    removeFromWishlist,
+    toggleWishlist,
+  } = useAppContext();
 
   return {
     wishlist,
-    isWishlisted: (productId) => wishlist.includes(productId),
-    toggleWishlist: (productId) => dispatch({ type: "WISHLIST_TOGGLE", payload: { productId } }),
-    removeFromWishlist: (productId) => dispatch({ type: "WISHLIST_REMOVE", payload: { productId } }),
+    loading: wishlistLoading,
+    error: wishlistError,
+    refresh: refreshWishlist,
+    isWishlisted,
+    addToWishlist,
+    removeFromWishlist,
+    toggleWishlist,
   };
 }

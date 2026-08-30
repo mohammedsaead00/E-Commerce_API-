@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth, useCart } from "../context/AppContext";
-import { getProductById } from "../data/products";
 import { api } from "../services/api";
 import {
   formatPrice,
@@ -31,7 +30,7 @@ const initialForm = {
 
 export default function Checkout() {
   const { user } = useAuth();
-  const { cart, clearCart } = useCart();
+  const { cart, loading, error: cartError, placeOrder } = useCartCheckout();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -43,11 +42,9 @@ export default function Checkout() {
   const [placing, setPlacing] = useState(false);
   const [placeError, setPlaceError] = useState("");
 
-  const lines = cart
-    .map((line) => ({ line, product: getProductById(line.productId) }))
-    .filter((entry) => entry.product);
+  const lines = cart.filter((line) => line.product);
 
-  const subtotal = lines.reduce((sum, { line, product }) => sum + product.price * line.qty, 0);
+  const subtotal = lines.reduce((sum, line) => sum + line.product.price * line.qty, 0);
   const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FLAT;
   const tax = subtotal * 0.08;
   const total = subtotal + shipping + tax;
@@ -80,34 +77,33 @@ export default function Checkout() {
 
     setPlacing(true);
     try {
-      const order = await api.placeOrder({
-        userEmail: form.email,
-        items: lines.map(({ line, product }) => ({
-          productId: product.id,
-          name: product.name,
-          image: product.images[0],
-          price: product.price,
-          qty: line.qty,
-          variant: line.variant,
-        })),
-        shippingAddress: {
-          fullName: form.fullName,
-          address: form.address,
-          city: form.city,
-          zip: form.zip,
-        },
-        subtotal,
-        shipping,
-        tax,
-        total,
+      const shippingAddress = `${form.fullName}, ${form.address}, ${form.city} ${form.zip}`;
+      const order = await placeOrder({
+        shippingAddress,
+        paymentMethod: "card",
       });
-      clearCart();
       navigate("/orders", { state: { justPlacedOrderId: order.id } });
     } catch (err) {
       setPlaceError(err.message || "Something went wrong placing your order.");
     } finally {
       setPlacing(false);
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="container page-section">
+        <div className="skeleton" style={{ height: 320 }} />
+      </div>
+    );
+  }
+
+  if (cartError) {
+    return (
+      <div className="container page-section">
+        <EmptyState icon="⚠️" title="Something went wrong" message={cartError} actionTo="/cart" actionLabel="Back to cart" />
+      </div>
+    );
   }
 
   if (lines.length === 0) {
@@ -212,7 +208,8 @@ export default function Checkout() {
               </div>
             </div>
             <p className="text-muted checkout-note">
-              This is a demo checkout — no real payment is processed and no card data leaves your browser.
+              This is a demo checkout — no real payment is processed and no card data leaves your browser. Your
+              order is created for real in the backend.
             </p>
           </section>
         </div>
@@ -220,12 +217,12 @@ export default function Checkout() {
         <aside className="cart-summary tag-card checkout-summary">
           <h2>Order summary</h2>
           <ul className="checkout-summary__list">
-            {lines.map(({ line, product }) => (
-              <li key={`${line.productId}-${line.variant?.size}-${line.variant?.color}`}>
+            {lines.map((line) => (
+              <li key={line.id}>
                 <span>
-                  {product.name} × {line.qty}
+                  {line.product.name} × {line.qty}
                 </span>
-                <span className="price">{formatPrice(product.price * line.qty)}</span>
+                <span className="price">{formatPrice(line.product.price * line.qty)}</span>
               </li>
             ))}
           </ul>
@@ -255,4 +252,19 @@ export default function Checkout() {
       </form>
     </div>
   );
+}
+
+// Small local wrapper: the order-creation endpoint reads the user's cart
+// server-side and clears it as part of the transaction, so after a
+// successful order we just need to pull the (now-empty) cart back down.
+function useCartCheckout() {
+  const cartApi = useCart();
+
+  async function placeOrder(details) {
+    const order = await api.placeOrder(details);
+    await cartApi.refresh();
+    return order;
+  }
+
+  return { ...cartApi, placeOrder };
 }

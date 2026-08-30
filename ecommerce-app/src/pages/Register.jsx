@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AppContext";
-import { api } from "../services/api";
 import { validateEmail, validatePassword, validateRequired } from "../utils/format";
 
 export default function Register() {
-  const { login } = useAuth();
+  const { register } = useAuth();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
@@ -36,8 +35,7 @@ export default function Register() {
     if (!validate()) return;
     setSubmitting(true);
     try {
-      const user = await api.register(form);
-      login(user);
+      await register(form);
       navigate("/", { replace: true });
     } catch (err) {
       setServerError(err.message);

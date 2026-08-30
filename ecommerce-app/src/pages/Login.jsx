@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AppContext";
-import { api } from "../services/api";
 import { validateEmail, validatePassword } from "../utils/format";
 
 export default function Login() {
@@ -35,8 +34,7 @@ export default function Login() {
     if (!validate()) return;
     setSubmitting(true);
     try {
-      const user = await api.login(form);
-      login(user);
+      await login(form);
       navigate(redirectTo, { replace: true });
     } catch (err) {
       setServerError(err.message);
@@ -87,7 +85,7 @@ export default function Login() {
           New to Loomé? <Link to="/register">Create an account</Link>
         </p>
         <p className="text-muted auth-card__hint">
-          Demo: register once, then log back in with the same details — accounts live in your browser only.
+          Demo accounts: admin@shop.com / admin123 or user@shop.com / user1234, or register your own.
         </p>
       </div>
     </div>

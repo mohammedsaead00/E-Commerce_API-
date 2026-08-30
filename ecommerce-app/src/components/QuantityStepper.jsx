@@ -1,6 +1,6 @@
 import "./QuantityStepper.css";
 
-export default function QuantityStepper({ value, onChange, min = 1, max = 99, size = "md" }) {
+export default function QuantityStepper({ value, onChange, min = 1, max = 99, size = "md", disabled = false }) {
   function clamp(next) {
     return Math.min(max, Math.max(min, next));
   }
@@ -11,7 +11,7 @@ export default function QuantityStepper({ value, onChange, min = 1, max = 99, si
         type="button"
         className="stepper__btn"
         onClick={() => onChange(clamp(value - 1))}
-        disabled={value <= min}
+        disabled={disabled || value <= min}
         aria-label="Decrease quantity"
       >
         −
@@ -23,7 +23,7 @@ export default function QuantityStepper({ value, onChange, min = 1, max = 99, si
         type="button"
         className="stepper__btn"
         onClick={() => onChange(clamp(value + 1))}
-        disabled={value >= max}
+        disabled={disabled || value >= max}
         aria-label="Increase quantity"
       >
         +
